@@ -23,6 +23,16 @@ jobs:
           java-version: '21'
           distribution: 'temurin'
 
+      # Configuration de Node.js pour Bruno CLI
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # Installation de Bruno CLI
+      - name: Install Bruno CLI
+        run: npm install -g @usebruno/cli
+
       # Étape 1 - Build de l'application
       - name: Build with Maven
         run: mvn -q clean package
@@ -52,17 +62,11 @@ jobs:
       - name: Prepare API test reports directory
         run: mkdir -p api-test-reports
 
-      # Étape 5 - Exécution des tests API via Hurl
-      - name: Run API tests (Hurl via Docker)
+      # Étape 5 - Exécution des tests API via Bruno CLI
+      - name: Run API tests (Bruno CLI)
         run: |
-          docker run --rm \
-            --add-host=host.docker.internal:host-gateway \
-            -v ${{ github.workspace }}:/work \
-            ghcr.io/orange-opensource/hurl:latest \
-            --test /work/src/test/java/api \
-            --report-junit /work/api-test-reports/junit.xml \
-            --report-html /work/api-test-reports/report.html \
-            --report-json /work/api-test-reports/report.json
+          cd src/test/api
+          bru run --env ci --output ../../../api-test-reports/results.json
 
       # Étape 6 - Arrêt de l'application
       - name: Stop application
