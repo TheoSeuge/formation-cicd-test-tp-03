@@ -2,38 +2,31 @@ name: CI/CD Pipeline - Tests API et Sécurité
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
+    branches: [main]
 
 jobs:
-  # Job 1 - Tests API
   api-tests:
     runs-on: ubuntu-latest
-
     steps:
-      # Checkout du code
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # Configuration de Java
       - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
           java-version: '21'
           distribution: 'temurin'
 
-      # Étape 1 - Build de l'application
       - name: Build with Maven
         run: mvn -q clean package
 
-      # Étape 2 - Démarrage de l'application
       - name: Start application
         run: |
           nohup java -jar target/formation-cicd-test-tp-03-1.0-SNAPSHOT.jar > app.log 2>&1 &
           echo $! > app.pid
 
-      # Étape 3 - Attente de disponibilité
       - name: Wait for API to be ready
         run: |
           for i in {1..30}; do
@@ -48,13 +41,10 @@ jobs:
           tail -n 200 app.log || true
           exit 1
 
-      # Préparation du répertoire des rapports
-      - name: Prepare API test reports directory
+      - name: Prepare reports directory
         run: mkdir -p api-test-reports
 
-      # Étape 5 - Exécution des tests API via Hurl
-      - name: Run API tests (Hurl via Docker)
-        id: hurl-tests
+      - name: Run API tests (Hurl)
         run: |
           docker run --rm \
             --add-host=host.docker.internal:host-gateway \
@@ -65,61 +55,13 @@ jobs:
             --report-html /work/api-test-reports \
             --report-json /work/api-test-reports/report.json
 
-      # Afficher les résultats des tests API dans le Summary
-      - name: Display API Test Results in Summary
-        if: always()
-        run: |
-          echo "## 🧪 Résultats des Tests API (Hurl)" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          if [ -f api-test-reports/junit.xml ]; then
-            # Parser le JUnit XML pour extraire les résultats
-            TESTS=$(grep -oP 'tests="\K[0-9]+' api-test-reports/junit.xml | head -1 || echo "0")
-            FAILURES=$(grep -oP 'failures="\K[0-9]+' api-test-reports/junit.xml | head -1 || echo "0")
-            ERRORS=$(grep -oP 'errors="\K[0-9]+' api-test-reports/junit.xml | head -1 || echo "0")
-            TIME=$(grep -oP 'time="\K[0-9.]+' api-test-reports/junit.xml | head -1 || echo "0")
-
-            PASSED=$((TESTS - FAILURES - ERRORS))
-
-            echo "| Fichier | Statut |" >> $GITHUB_STEP_SUMMARY
-            echo "|---------|--------|" >> $GITHUB_STEP_SUMMARY
-
-            # Lister les fichiers de test en vérifiant s'ils ont des échecs
-            for file in src/test/java/api/*.hurl; do
-              filename=$(basename "$file")
-              # Chercher si ce fichier a une balise <failure> dans son testcase
-              if grep -A5 "name=\"$filename\"" api-test-reports/junit.xml | grep -q "<failure"; then
-                echo "| $filename | ❌ Échec |" >> $GITHUB_STEP_SUMMARY
-              else
-                echo "| $filename | ✅ Succès |" >> $GITHUB_STEP_SUMMARY
-              fi
-            done
-
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "### 📊 Résumé" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "| Métrique | Valeur |" >> $GITHUB_STEP_SUMMARY
-            echo "|----------|--------|" >> $GITHUB_STEP_SUMMARY
-            echo "| Total | $TESTS tests |" >> $GITHUB_STEP_SUMMARY
-            echo "| Réussis | $PASSED ✅ |" >> $GITHUB_STEP_SUMMARY
-            echo "| Échoués | $FAILURES ❌ |" >> $GITHUB_STEP_SUMMARY
-            echo "| Erreurs | $ERRORS ⚠️ |" >> $GITHUB_STEP_SUMMARY
-            echo "| Durée | ${TIME}s |" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "⚠️ Fichier de résultats JUnit non trouvé" >> $GITHUB_STEP_SUMMARY
-          fi
-
-      # Étape 6 - Arrêt de l'application
       - name: Stop application
         if: always()
         run: |
           if [ -f app.pid ]; then
             kill $(cat app.pid) || true
           fi
-          echo "=== Application Logs ==="
-          cat app.log || true
 
-      # Upload des rapports de tests API
       - name: Upload API test reports
         uses: actions/upload-artifact@v4
         if: always()
@@ -127,34 +69,27 @@ jobs:
           name: api-test-reports
           path: api-test-reports/
 
-  # Job 2 - Tests de sécurité
   security-scan:
     runs-on: ubuntu-latest
     needs: api-tests
-
     steps:
-      # Checkout du code
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # Configuration de Java
       - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
           java-version: '21'
           distribution: 'temurin'
 
-      # Étape 7 - Rebuild de l'application
       - name: Build with Maven
         run: mvn -q clean package
 
-      # Redémarrage de l'application
       - name: Start application
         run: |
           nohup java -jar target/formation-cicd-test-tp-03-1.0-SNAPSHOT.jar > app.log 2>&1 &
           echo $! > app.pid
 
-      # Attente de disponibilité
       - name: Wait for API to be ready
         run: |
           for i in {1..30}; do
@@ -169,51 +104,26 @@ jobs:
           tail -n 200 app.log || true
           exit 1
 
-      # Étape 8 - Scan OWASP ZAP
       - name: OWASP ZAP Baseline Scan
         uses: zaproxy/action-baseline@v0.14.0
         with:
           target: 'http://localhost:8080'
-          rules_file_name: ''
           cmd_options: '-a'
           allow_issue_writing: false
           fail_action: false
 
-      # Afficher les résultats ZAP dans le Summary
-      - name: Display ZAP Security Results in Summary
-        if: always()
-        run: |
-          echo "## 🔒 Rapport de Sécurité OWASP ZAP" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          if [ -f report_md.md ]; then
-            cat report_md.md >> $GITHUB_STEP_SUMMARY
-          elif [ -f report_json.json ]; then
-            echo "### Alertes détectées" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "| Risque | Alerte | Instances |" >> $GITHUB_STEP_SUMMARY
-            echo "|--------|--------|-----------|" >> $GITHUB_STEP_SUMMARY
-            jq -r '.site[].alerts[] | "| \(.riskdesc | split(" ")[0]) | \(.name) | \(.count) |"' report_json.json >> $GITHUB_STEP_SUMMARY 2>/dev/null || echo "| - | Aucune alerte | - |" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "⚠️ Rapport ZAP non trouvé" >> $GITHUB_STEP_SUMMARY
-          fi
-
-      # Arrêt de l'application
       - name: Stop application
         if: always()
         run: |
           if [ -f app.pid ]; then
             kill $(cat app.pid) || true
           fi
-          echo "=== Application Logs ==="
-          cat app.log || true
 
-      # Étape 9 - Upload des rapports de sécurité
-      - name: Upload ZAP security reports
+      - name: Upload ZAP reports
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: zap-security-reports
+          name: zap-reports
           path: |
             report_html.html
             report_json.json
