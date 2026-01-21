@@ -84,10 +84,11 @@ jobs:
             echo "| Fichier | Statut |" >> $GITHUB_STEP_SUMMARY
             echo "|---------|--------|" >> $GITHUB_STEP_SUMMARY
 
-            # Lister les fichiers de test
+            # Lister les fichiers de test en vérifiant s'ils ont des échecs
             for file in src/test/java/api/*.hurl; do
               filename=$(basename "$file")
-              if grep -q "failure" api-test-reports/junit.xml && grep -q "$filename" api-test-reports/junit.xml; then
+              # Chercher si ce fichier a une balise <failure> dans son testcase
+              if grep -A5 "name=\"$filename\"" api-test-reports/junit.xml | grep -q "<failure"; then
                 echo "| $filename | ❌ Échec |" >> $GITHUB_STEP_SUMMARY
               else
                 echo "| $filename | ✅ Succès |" >> $GITHUB_STEP_SUMMARY
