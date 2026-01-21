@@ -221,7 +221,7 @@ Mots-clés utiles pour vos recherches :
 * “always() condition GitHub Actions”
 
 ### Étape 10 — Analyse des rapports
-Les rapports sont disponibles en tant qu’artifacts GitHub Actions.
+Les rapports sont disponibles en tant qu’artifacts GitHub Actipons.
 
 Prenez le temps de :
 * ouvrir le rapport HTML,

@@ -64,9 +64,40 @@ jobs:
 
       # Étape 5 - Exécution des tests API via Bruno CLI
       - name: Run API tests (Bruno CLI)
+        id: bruno-tests
         run: |
           cd src/test/api
           bru run --env ci --output ../../../api-test-reports/results.json
+
+      # Afficher les résultats des tests API dans le Summary
+      - name: Display API Test Results in Summary
+        if: always()
+        run: |
+          echo "## 🧪 Résultats des Tests API (Bruno)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ -f api-test-reports/results.json ]; then
+            # Parser le JSON et générer un tableau Markdown
+            echo "| Test | Statut |" >> $GITHUB_STEP_SUMMARY
+            echo "|------|--------|" >> $GITHUB_STEP_SUMMARY
+
+            # Extraire les résultats avec jq
+            jq -r '.results[] | "| \(.request.name // .request.url) | \(if .error then "❌ Échec" else "✅ Succès" end) |"' api-test-reports/results.json >> $GITHUB_STEP_SUMMARY 2>/dev/null || echo "| Parsing error | ⚠️ |" >> $GITHUB_STEP_SUMMARY
+
+            echo "" >> $GITHUB_STEP_SUMMARY
+
+            # Résumé
+            TOTAL=$(jq '.results | length' api-test-reports/results.json 2>/dev/null || echo "0")
+            FAILED=$(jq '[.results[] | select(.error)] | length' api-test-reports/results.json 2>/dev/null || echo "0")
+            PASSED=$((TOTAL - FAILED))
+
+            echo "### 📊 Résumé" >> $GITHUB_STEP_SUMMARY
+            echo "- **Total**: $TOTAL tests" >> $GITHUB_STEP_SUMMARY
+            echo "- **Réussis**: $PASSED ✅" >> $GITHUB_STEP_SUMMARY
+            echo "- **Échoués**: $FAILED ❌" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⚠️ Fichier de résultats non trouvé" >> $GITHUB_STEP_SUMMARY
+          fi
 
       # Étape 6 - Arrêt de l'application
       - name: Stop application
@@ -137,6 +168,25 @@ jobs:
           cmd_options: '-a'
           allow_issue_writing: false
           fail_action: false
+
+      # Afficher les résultats ZAP dans le Summary
+      - name: Display ZAP Security Results in Summary
+        if: always()
+        run: |
+          echo "## 🔒 Rapport de Sécurité OWASP ZAP" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ -f report_md.md ]; then
+            cat report_md.md >> $GITHUB_STEP_SUMMARY
+          elif [ -f report_json.json ]; then
+            echo "### Alertes détectées" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "| Risque | Alerte | Instances |" >> $GITHUB_STEP_SUMMARY
+            echo "|--------|--------|-----------|" >> $GITHUB_STEP_SUMMARY
+            jq -r '.site[].alerts[] | "| \(.riskdesc | split(" ")[0]) | \(.name) | \(.count) |"' report_json.json >> $GITHUB_STEP_SUMMARY 2>/dev/null || echo "| - | Aucune alerte | - |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⚠️ Rapport ZAP non trouvé" >> $GITHUB_STEP_SUMMARY
+          fi
 
       # Arrêt de l'application
       - name: Stop application
