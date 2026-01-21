@@ -23,16 +23,6 @@ jobs:
           java-version: '21'
           distribution: 'temurin'
 
-      # Configuration de Node.js pour Bruno CLI
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      # Installation de Bruno CLI
-      - name: Install Bruno CLI
-        run: npm install -g @usebruno/cli
-
       # Étape 1 - Build de l'application
       - name: Build with Maven
         run: mvn -q clean package
@@ -62,41 +52,60 @@ jobs:
       - name: Prepare API test reports directory
         run: mkdir -p api-test-reports
 
-      # Étape 5 - Exécution des tests API via Bruno CLI
-      - name: Run API tests (Bruno CLI)
-        id: bruno-tests
+      # Étape 5 - Exécution des tests API via Hurl
+      - name: Run API tests (Hurl via Docker)
+        id: hurl-tests
         run: |
-          cd src/test/api
-          bru run --env ci --output ../../../api-test-reports/results.json
+          docker run --rm \
+            --add-host=host.docker.internal:host-gateway \
+            -v ${{ github.workspace }}:/work \
+            ghcr.io/orange-opensource/hurl:latest \
+            --test /work/src/test/java/api \
+            --report-junit /work/api-test-reports/junit.xml \
+            --report-html /work/api-test-reports \
+            --report-json /work/api-test-reports/report.json
 
       # Afficher les résultats des tests API dans le Summary
       - name: Display API Test Results in Summary
         if: always()
         run: |
-          echo "## 🧪 Résultats des Tests API (Bruno)" >> $GITHUB_STEP_SUMMARY
+          echo "## 🧪 Résultats des Tests API (Hurl)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
-          if [ -f api-test-reports/results.json ]; then
-            # Parser le JSON et générer un tableau Markdown
-            echo "| Test | Statut |" >> $GITHUB_STEP_SUMMARY
-            echo "|------|--------|" >> $GITHUB_STEP_SUMMARY
+          if [ -f api-test-reports/junit.xml ]; then
+            # Parser le JUnit XML pour extraire les résultats
+            TESTS=$(grep -oP 'tests="\K[0-9]+' api-test-reports/junit.xml | head -1 || echo "0")
+            FAILURES=$(grep -oP 'failures="\K[0-9]+' api-test-reports/junit.xml | head -1 || echo "0")
+            ERRORS=$(grep -oP 'errors="\K[0-9]+' api-test-reports/junit.xml | head -1 || echo "0")
+            TIME=$(grep -oP 'time="\K[0-9.]+' api-test-reports/junit.xml | head -1 || echo "0")
 
-            # Extraire les résultats avec jq
-            jq -r '.results[] | "| \(.request.name // .request.url) | \(if .error then "❌ Échec" else "✅ Succès" end) |"' api-test-reports/results.json >> $GITHUB_STEP_SUMMARY 2>/dev/null || echo "| Parsing error | ⚠️ |" >> $GITHUB_STEP_SUMMARY
+            PASSED=$((TESTS - FAILURES - ERRORS))
+
+            echo "| Fichier | Statut |" >> $GITHUB_STEP_SUMMARY
+            echo "|---------|--------|" >> $GITHUB_STEP_SUMMARY
+
+            # Lister les fichiers de test
+            for file in src/test/java/api/*.hurl; do
+              filename=$(basename "$file")
+              if grep -q "failure" api-test-reports/junit.xml && grep -q "$filename" api-test-reports/junit.xml; then
+                echo "| $filename | ❌ Échec |" >> $GITHUB_STEP_SUMMARY
+              else
+                echo "| $filename | ✅ Succès |" >> $GITHUB_STEP_SUMMARY
+              fi
+            done
 
             echo "" >> $GITHUB_STEP_SUMMARY
-
-            # Résumé
-            TOTAL=$(jq '.results | length' api-test-reports/results.json 2>/dev/null || echo "0")
-            FAILED=$(jq '[.results[] | select(.error)] | length' api-test-reports/results.json 2>/dev/null || echo "0")
-            PASSED=$((TOTAL - FAILED))
-
             echo "### 📊 Résumé" >> $GITHUB_STEP_SUMMARY
-            echo "- **Total**: $TOTAL tests" >> $GITHUB_STEP_SUMMARY
-            echo "- **Réussis**: $PASSED ✅" >> $GITHUB_STEP_SUMMARY
-            echo "- **Échoués**: $FAILED ❌" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "| Métrique | Valeur |" >> $GITHUB_STEP_SUMMARY
+            echo "|----------|--------|" >> $GITHUB_STEP_SUMMARY
+            echo "| Total | $TESTS tests |" >> $GITHUB_STEP_SUMMARY
+            echo "| Réussis | $PASSED ✅ |" >> $GITHUB_STEP_SUMMARY
+            echo "| Échoués | $FAILURES ❌ |" >> $GITHUB_STEP_SUMMARY
+            echo "| Erreurs | $ERRORS ⚠️ |" >> $GITHUB_STEP_SUMMARY
+            echo "| Durée | ${TIME}s |" >> $GITHUB_STEP_SUMMARY
           else
-            echo "⚠️ Fichier de résultats non trouvé" >> $GITHUB_STEP_SUMMARY
+            echo "⚠️ Fichier de résultats JUnit non trouvé" >> $GITHUB_STEP_SUMMARY
           fi
 
       # Étape 6 - Arrêt de l'application
